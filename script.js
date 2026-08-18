@@ -306,6 +306,25 @@ const catConfig = {
 let currentCat = 'all';
 let searchQuery = '';
 let cart = {}; // { productId: quantity }
+let openDescs = new Set(); // id товаров, у которых описание раскрыто в карточке
+let modalProductId = null; // id товара в открытом окне
+
+// Описание товара (из descriptions.js)
+function getDescription(p) {
+  return (typeof productDescriptions !== 'undefined' && productDescriptions[p.id]) || '';
+}
+
+// Показать / скрыть описание прямо в карточке товара
+function toggleDesc(id, btn) {
+  const el = document.getElementById('desc-' + id);
+  if (!el) return;
+  const isOpen = el.classList.toggle('open');
+  if (isOpen) openDescs.add(id); else openDescs.delete(id);
+  if (btn) {
+    btn.classList.toggle('open', isOpen);
+    btn.querySelector('.desc-btn-label').textContent = isOpen ? 'Скрыть описание' : 'Читать описание';
+  }
+}
 
 // ========== CART FUNCTIONS ==========
 function getRetailPrice(p) {
@@ -313,9 +332,19 @@ function getRetailPrice(p) {
 }
 
 function addToCart(id) {
-  cart[id] = (cart[id] || 0) + 1;
+  changeQty(id, 1);
+}
+
+// Изменить количество товара на +1 / −1 из карточки или из окна товара
+function changeQty(id, delta) {
+  const next = (cart[id] || 0) + delta;
+  if (next <= 0) delete cart[id];
+  else cart[id] = next;
   updateCartBadge();
   renderProducts();
+  syncModalQty(id);
+  const drawer = document.getElementById('cartDrawer');
+  if (drawer && drawer.classList.contains('open')) renderCart();
 }
 
 function removeFromCart(id) {
@@ -446,7 +475,24 @@ function renderProducts() {
       ? p.retailKzt.toLocaleString('ru-RU') + ' ₸'
       : (p.retailUsd ? p.retailUsd + ' $' : p.priceUsd + ' $');
     const inCart = cart[p.id] || 0;
-    const cartLabel = inCart ? `🛒 В корзине (${inCart})` : `🛒 В корзину`;
+    const desc = getDescription(p);
+    const descOpen = openDescs.has(p.id);
+    const descHtml = desc ? `
+          <button class="product-desc-btn ${descOpen ? 'open' : ''}" onclick="event.stopPropagation(); toggleDesc(${p.id}, this)">
+            <span class="desc-btn-icon">📖</span>
+            <span class="desc-btn-label">${descOpen ? 'Скрыть описание' : 'Читать описание'}</span>
+            <span class="desc-btn-arrow">▾</span>
+          </button>
+          <div class="product-desc ${descOpen ? 'open' : ''}" id="desc-${p.id}" onclick="event.stopPropagation()">${desc}</div>` : '';
+    const cartControl = inCart ? `
+          <div class="product-qty" onclick="event.stopPropagation()">
+            <button class="product-qty-btn" onclick="event.stopPropagation(); changeQty(${p.id}, -1)" aria-label="Уменьшить">−</button>
+            <span class="product-qty-val">${inCart} шт.</span>
+            <button class="product-qty-btn" onclick="event.stopPropagation(); changeQty(${p.id}, 1)" aria-label="Увеличить">+</button>
+          </div>` : `
+          <button class="product-cart-btn" onclick="event.stopPropagation(); addToCart(${p.id})">
+            🛒 В корзину
+          </button>`;
     const imgSrc = productImages[p.id];
     const imgHtml = imgSrc
       ? `<img src="images/${imgSrc}" alt="${p.brand}" class="product-img" loading="lazy" />`
@@ -460,10 +506,9 @@ function renderProducts() {
         <div class="product-card-body">
           <div class="product-brand">${p.brand}</div>
           <div class="product-name">${p.name}</div>
+          ${descHtml}
           <div class="product-price-retail">${mainPrice}</div>
-          <button class="product-cart-btn ${inCart ? 'in-cart' : ''}" onclick="event.stopPropagation(); addToCart(${p.id})">
-            ${cartLabel}
-          </button>
+          ${cartControl}
           <button class="product-order" onclick="event.stopPropagation(); orderProduct('${escHtml(p.brand + ' ' + p.name)}')">
             ${waIconSvg}
             Заказать
@@ -483,7 +528,7 @@ function openModal(id) {
   const retailPrice = p.retailKzt
     ? p.retailKzt.toLocaleString('ru-RU') + ' ₸'
     : (p.retailUsd ? p.retailUsd + ' $' : p.priceUsd + ' $');
-  const inCart = cart[p.id] || 0;
+  const desc = getDescription(p);
   const waMsg = encodeURIComponent(`Здравствуйте! Хочу заказать: ${p.brand} ${p.name}`);
   const waIconSvg = `<svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.136.562 4.14 1.541 5.875L.057 23.476a.5.5 0 0 0 .608.62l5.701-1.493A11.943 11.943 0 0 0 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.818a9.8 9.8 0 0 1-5.005-1.37l-.358-.214-3.724.975.994-3.625-.234-.373A9.776 9.776 0 0 1 2.182 12C2.182 6.573 6.573 2.182 12 2.182S21.818 6.573 21.818 12 17.427 21.818 12 21.818z"/></svg>`;
 
@@ -496,33 +541,48 @@ function openModal(id) {
     <div class="modal-brand">${p.brand}</div>
     <div class="modal-name">${p.name}</div>
     <div class="modal-barcode">Штрих-код: ${p.barcode}</div>
+    ${desc ? `<div class="modal-desc-block">
+      <div class="modal-desc-title">Описание</div>
+      <p class="modal-desc">${desc}</p>
+    </div>` : ''}
     <div class="modal-price-single">
       <span class="modal-price-label">Цена</span>
       <span class="modal-price-value">${retailPrice}</span>
     </div>
     <div class="modal-actions">
-      <button class="modal-cart-btn ${inCart ? 'in-cart' : ''}" id="modalCartBtn" onclick="modalAddToCart(${p.id})">
-        🛒 ${inCart ? `В корзине (${inCart} шт.)` : 'Добавить в корзину'}
-      </button>
+      <div id="modalCartArea">${modalCartControl(p.id)}</div>
       <a href="https://wa.me/77778223071?text=${waMsg}" target="_blank" class="modal-order">
         ${waIconSvg} Заказать сейчас
       </a>
     </div>`;
   document.getElementById('modalOverlay').classList.add('open');
   document.body.style.overflow = 'hidden';
+  modalProductId = p.id;
 }
 
-function modalAddToCart(id) {
-  addToCart(id);
-  const btn = document.getElementById('modalCartBtn');
-  if (btn) {
-    const qty = cart[id] || 0;
-    btn.textContent = `🛒 В корзине (${qty} шт.)`;
-    btn.classList.add('in-cart');
+// Кнопка «в корзину» или счётчик +/− внутри окна товара
+function modalCartControl(id) {
+  const qty = cart[id] || 0;
+  if (!qty) {
+    return `<button class="modal-cart-btn" onclick="changeQty(${id}, 1)">🛒 Добавить в корзину</button>`;
   }
+  return `
+    <div class="modal-qty">
+      <button class="modal-qty-btn" onclick="changeQty(${id}, -1)" aria-label="Уменьшить">−</button>
+      <span class="modal-qty-val">В корзине: ${qty} шт.</span>
+      <button class="modal-qty-btn" onclick="changeQty(${id}, 1)" aria-label="Увеличить">+</button>
+    </div>`;
+}
+
+// Обновить счётчик в открытом окне товара, если меняли количество этого же товара
+function syncModalQty(id) {
+  if (modalProductId !== id) return;
+  const area = document.getElementById('modalCartArea');
+  if (area) area.innerHTML = modalCartControl(id);
 }
 
 function closeModal() {
+  modalProductId = null;
   document.getElementById('modalOverlay').classList.remove('open');
   document.body.style.overflow = '';
 }
